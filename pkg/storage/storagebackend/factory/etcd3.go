@@ -48,6 +48,7 @@ import (
 	"k8s.io/apiserver/pkg/server/egressselector"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/etcd3"
+	"k8s.io/apiserver/pkg/storage/etcd3/etcd3retry"
 	"k8s.io/apiserver/pkg/storage/etcd3/metrics"
 	"k8s.io/apiserver/pkg/storage/storagebackend"
 	"k8s.io/apiserver/pkg/storage/value/encrypt/identity"
@@ -154,13 +155,13 @@ func newETCD3Check(c storagebackend.Config, timeout time.Duration, stopCh <-chan
 	// retry in a loop in the background until we successfully create the client, storing the client or error encountered
 
 	lock := sync.RWMutex{}
-	var prober *etcd3ProberMonitor
+	var prober *etcd3RetryingProberMonitor
 	clientErr := fmt.Errorf("etcd client connection not yet established")
 
 	go wait.PollImmediateUntil(time.Second, func() (bool, error) {
 		lock.Lock()
 		defer lock.Unlock()
-		newProber, err := newETCD3ProberMonitor(c)
+		newProber, err := newRetryingETCD3ProberMonitor(c)
 		// Ensure that server is already not shutting down.
 		select {
 		case <-stopCh:
@@ -454,7 +455,7 @@ func newETCD3Storage(c storagebackend.ConfigForResource, newFunc, newListFunc fu
 	if transformer == nil {
 		transformer = identity.NewEncryptCheckTransformer()
 	}
-	return etcd3.New(client, c.Codec, newFunc, newListFunc, c.Prefix, resourcePrefix, c.GroupResource, transformer, c.LeaseManagerConfig), destroyFunc, nil
+	return etcd3retry.NewRetryingEtcdStorage(etcd3.New(client, c.Codec, newFunc, newListFunc, c.Prefix, resourcePrefix, c.GroupResource, transformer, c.LeaseManagerConfig)), destroyFunc, nil
 }
 
 // startDBSizeMonitorPerEndpoint starts a loop to monitor etcd database size and update the
